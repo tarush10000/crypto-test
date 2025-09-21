@@ -1,9 +1,9 @@
-import DigitalSignatureDemo from '@/components/dss/DigitalSignatureDemo';
+import EnhancedDigitalSignatureDemo from '@/components/dss/EnhanchedDigitalSignatureDemo';
 
 export default function Home() {
   return (
     <main className="min-h-screen">
-      <DigitalSignatureDemo />
+      <EnhancedDigitalSignatureDemo/>
     </main>
   );
 }
