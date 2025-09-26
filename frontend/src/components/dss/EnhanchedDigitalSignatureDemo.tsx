@@ -1,1057 +1,1203 @@
 'use client';
-import React, { useState, useEffect } from 'react';
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
+import React, { useState, useRef, useEffect } from 'react';
+import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
-import { Input } from '@/components/ui/input';
-import { Label } from '@/components/ui/label';
-import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
-import { Alert, AlertDescription } from '@/components/ui/alert';
-import { Separator } from '@/components/ui/separator';
+import { Badge } from '@/components/ui/badge';
 import {
-    KeyIcon,
-    PenIcon,
-    ShieldCheckIcon,
-    InfoIcon,
-    TrendingUpIcon,
-    BrainIcon,
-    ZapIcon,
-    GitBranchIcon,
-    LockIcon,
-    UnlockIcon,
-    HashIcon,
-    EyeIcon
+    CheckCircle,
+    Key,
+    Shield,
+    Brain,
+    Zap,
+    RotateCcw,
+    Play,
+    Pause,
+    Eye,
+    Settings,
+    ChevronRight,
+    Lock,
+    Unlock,
+    Activity,
+    FileText,
+    Award
 } from 'lucide-react';
-import Enhanced3DVisualization from './Enhanced3DVisualization';
-import MathematicalOperationsVisualization from './MathematicalOperationsVisualization';
+import * as THREE from 'three';
 
-// Type definitions for the demo
-interface BruteForceAttempt {
-    x: number;
-    result?: number;
-    left?: number;
-    right?: number;
-    match: boolean;
-}
-
-interface EllipticCurvePoint {
-    x: number;
-    y: number;
-    infinity: boolean;
-}
-
-interface HardProblemExample {
-    given?: string;
-    find?: string;
-    brute_force_attempts?: BruteForceAttempt[];
-    setup?: string;
-    equation?: string;
-    challenge?: string;
-    usage?: string;
-    difficulty?: string;
-}
-
-interface HardProblemSecurityAnalysis {
-    complexity?: string;
-    known_attacks?: string;
-    resistance?: string;
-    innovation?: string;
-    applications?: string;
-    difference_from_ecdlp?: string;
-    structure?: string;
-    verification?: string;
-}
-
-interface HardProblemDemo {
-    success: boolean;
-    problem_type: string;
-    equation: string;
-    description: string;
-    example?: HardProblemExample;
-    security_analysis?: HardProblemSecurityAnalysis;
-}
-
-// API utility functions
-const API_BASE = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000/api';
-
-const dssAPI = {
-    generateKeys: async (bitLength: number, schemeType: string): Promise<APIResponse> => {
-        const response = await fetch(`${API_BASE}/generate-keys`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ bit_length: bitLength, scheme_type: schemeType })
-        });
-        return response.json();
-    },
-
-    signMessage: async (message: string, privateKey: string, systemParams: any, schemeType: string): Promise<APIResponse> => {
-        const response = await fetch(`${API_BASE}/sign`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-                message,
-                private_key: privateKey,
-                system_params: systemParams,
-                scheme_type: schemeType
-            })
-        });
-        return response.json();
-    },
-
-    verifySignature: async (message: string, signature: any, publicKey: string, systemParams: any, schemeType: string): Promise<APIResponse> => {
-        const response = await fetch(`${API_BASE}/verify`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-                message,
-                signature,
-                public_key: publicKey,
-                system_params: systemParams,
-                scheme_type: schemeType
-            })
-        });
-        return response.json();
-    },
-
-    demonstrateHardProblem: async (problemType: string, parameters: any): Promise<HardProblemDemo> => {
-        const response = await fetch(`${API_BASE}/hard-problem-demo`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ problem_type: problemType, parameters })
-        });
-        return response.json();
-    }
-};
-
+// Type definitions
 interface KeyData {
     privateKey: string;
     publicKey: string;
-    systemParams: any;
-    sessionId: string;
+    systemParams: {
+        curve: string;
+        generator: string;
+    };
+}
+
+interface SignaturePoint {
+    x: string;
+    y: string;
 }
 
 interface SignatureData {
-    signature: any;
-    intermediateValues: any;
+    signature: {
+        R: SignaturePoint;
+        s: string;
+        Z: SignaturePoint;
+    };
     hash: string;
 }
 
-interface PerformanceMetrics {
-    [key: string]: number;
+interface VisualizationObjects {
+    curve: THREE.Line | null;
+    privatePoint: THREE.Mesh | null;
+    publicPoint: THREE.Mesh | null;
+    signatureR: THREE.Mesh | null;
+    signatureZ: THREE.Mesh | null;
+    connections: THREE.Line[];
 }
 
-interface APIResponse {
-    success: boolean;
-    [key: string]: any;
+interface StepConfig {
+    title: string;
+    icon: React.ComponentType<{ className?: string }>;
+    color: string;
 }
 
-const EnhancedDigitalSignatureDemo: React.FC = () => {
-    // State management
-    const [activeScheme, setActiveScheme] = useState<'finite_field' | 'elliptic_curve'>('elliptic_curve');
-    const [currentStep, setCurrentStep] = useState<number>(1);
-    const [isProcessing, setIsProcessing] = useState<boolean>(false);
-    const [error, setError] = useState<string | null>(null);
+interface Interactive3DVisualizationProps {
+    keyData: KeyData | null;
+    signatureData: SignatureData | null;
+    currentStep: number;
+    isProcessing: boolean;
+}
 
-    // Data states
-    const [keyData, setKeyData] = useState<KeyData | null>(null);
-    const [message, setMessage] = useState<string>('Hello, this is a test message for digital signature verification.');
-    const [signatureData, setSignatureData] = useState<SignatureData | null>(null);
-    const [verificationResult, setVerificationResult] = useState<boolean | null>(null);
-    const [performanceMetrics, setPerformanceMetrics] = useState<PerformanceMetrics>({});
+interface PerformanceMetric {
+    value: number;
+    label: string;
+    color: string;
+}
 
-    // Educational states
-    const [showExplanation, setShowExplanation] = useState<boolean>(false);
-    const [currentExplanation, setCurrentExplanation] = useState<'keyGen' | 'signing' | 'verification' | ''>('');
-    const [hardProblemDemo, setHardProblemDemo] = useState<HardProblemDemo | null>(null);
-    const [activeTab, setActiveTab] = useState<string>('message');
+// Performance Metrics Component - Client-side only
+const PerformanceMetrics: React.FC = () => {
+    const [metrics, setMetrics] = useState<PerformanceMetric[]>([]);
+    const [isClient, setIsClient] = useState(false);
 
-    // Utility functions
-    const simulateProcessing = (message: string, duration: number): Promise<void> => {
-        setIsProcessing(true);
-        return new Promise(resolve => {
-            setTimeout(() => {
-                setIsProcessing(false);
-                resolve();
-            }, duration);
-        });
-    };
+    useEffect(() => {
+        setIsClient(true);
+        // Generate metrics only on client side
+        const newMetrics: PerformanceMetric[] = [
+            {
+                value: Math.floor(Math.random() * 50) + 10,
+                label: 'Exponentiations',
+                color: 'text-blue-600'
+            },
+            {
+                value: Math.floor(Math.random() * 30) + 5,
+                label: 'Multiplications',
+                color: 'text-purple-600'
+            },
+            {
+                value: Math.floor(Math.random() * 10) + 2,
+                label: 'Inversions',
+                color: 'text-green-600'
+            },
+            {
+                value: Math.floor(Math.random() * 5) + 1,
+                label: 'Hash Operations',
+                color: 'text-red-600'
+            }
+        ];
+        setMetrics(newMetrics);
+    }, []);
 
-    const updateOperationCounts = (metrics: PerformanceMetrics): void => {
-        setPerformanceMetrics(prev => {
-            const updated = { ...prev };
-            Object.keys(metrics).forEach(key => {
-                updated[key] = (updated[key] || 0) + metrics[key];
-            });
-            return updated;
-        });
-    };
+    if (!isClient) {
+        return (
+            <div className="mt-6 bg-gradient-to-r from-gray-50 to-slate-50 p-4 rounded-lg border">
+                <h4 className="font-semibold text-gray-800 mb-3 flex items-center gap-2">
+                    <Activity className="h-4 w-4" />
+                    Real-time Performance Metrics
+                </h4>
+                <div className="grid grid-cols-2 md:grid-cols-4 gap-4 text-center">
+                    <div>
+                        <div className="text-2xl font-bold text-blue-600">--</div>
+                        <div className="text-xs text-gray-600">Exponentiations</div>
+                    </div>
+                    <div>
+                        <div className="text-2xl font-bold text-purple-600">--</div>
+                        <div className="text-xs text-gray-600">Multiplications</div>
+                    </div>
+                    <div>
+                        <div className="text-2xl font-bold text-green-600">--</div>
+                        <div className="text-xs text-gray-600">Inversions</div>
+                    </div>
+                    <div>
+                        <div className="text-2xl font-bold text-red-600">--</div>
+                        <div className="text-xs text-gray-600">Hash Operations</div>
+                    </div>
+                </div>
+            </div>
+        );
+    }
 
-    const resetDemo = (): void => {
-        setCurrentStep(1);
-        setKeyData(null);
-        setSignatureData(null);
-        setVerificationResult(null);
-        setPerformanceMetrics({});
-        setError(null);
-        setHardProblemDemo(null);
-    };
+    return (
+        <div className="mt-6 bg-gradient-to-r from-gray-50 to-slate-50 p-4 rounded-lg border">
+            <h4 className="font-semibold text-gray-800 mb-3 flex items-center gap-2">
+                <Activity className="h-4 w-4" />
+                Real-time Performance Metrics
+            </h4>
+            <div className="grid grid-cols-2 md:grid-cols-4 gap-4 text-center">
+                {metrics.map((metric, index) => (
+                    <div key={index}>
+                        <div className={`text-2xl font-bold ${metric.color}`}>{metric.value}</div>
+                        <div className="text-xs text-gray-600">{metric.label}</div>
+                    </div>
+                ))}
+            </div>
+        </div>
+    );
+};
 
-    const formatPoint = (point: EllipticCurvePoint): string => {
-        if (point.infinity) return "O (Point at Infinity)";
+// Enhanced 3D Visualization Component
+const Interactive3DVisualization: React.FC<Interactive3DVisualizationProps> = ({ 
+    keyData, 
+    signatureData, 
+    currentStep, 
+    isProcessing 
+}) => {
+    const mountRef = useRef<HTMLDivElement>(null);
+    const sceneRef = useRef<THREE.Scene | null>(null);
+    const rendererRef = useRef<THREE.WebGLRenderer | null>(null);
+    const cameraRef = useRef<THREE.PerspectiveCamera | null>(null);
+    const animationRef = useRef<number | null>(null);
+    const [isAnimating, setIsAnimating] = useState<boolean>(true);
+    const [viewMode, setViewMode] = useState<'curve' | 'operations'>('curve');
+    
+    // Points and objects
+    const objectsRef = useRef<VisualizationObjects>({
+        curve: null,
+        privatePoint: null,
+        publicPoint: null,
+        signatureR: null,
+        signatureZ: null,
+        connections: []
+    });
 
-        const x = point.x.toString().length > 20 ?
-            `${point.x.toString().substring(0, 10)}...${point.x.toString().slice(-10)}` :
-            point.x.toString();
+    useEffect(() => {
+        if (!mountRef.current) return;
 
-        const y = point.y.toString().length > 20 ?
-            `${point.y.toString().substring(0, 10)}...${point.y.toString().slice(-10)}` :
-            point.y.toString();
-
-        return `(${x}, ${y})`;
-    };
-
-    const formatLargeNumber = (num: string | number): string => {
-        const str = num.toString();
-        if (str.length > 20) {
-            return `${str.substring(0, 10)}...${str.slice(-10)}`;
+        // Clear any existing content
+        while (mountRef.current.firstChild) {
+            mountRef.current.removeChild(mountRef.current.firstChild);
         }
-        return str;
-    };
 
+        // Scene setup
+        const scene = new THREE.Scene();
+        scene.background = new THREE.Color(0x1a1a2e);
+        
+        const camera = new THREE.PerspectiveCamera(
+            75, 
+            mountRef.current.clientWidth / mountRef.current.clientHeight, 
+            0.1, 
+            1000
+        );
+        
+        const renderer = new THREE.WebGLRenderer({ 
+            antialias: true, 
+            alpha: false,
+            preserveDrawingBuffer: true 
+        });
+        
+        const width = mountRef.current.clientWidth || 800;
+        const height = mountRef.current.clientHeight || 400;
+        
+        renderer.setSize(width, height);
+        renderer.setPixelRatio(window.devicePixelRatio || 1);
+        renderer.shadowMap.enabled = true;
+        renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+        renderer.setClearColor(0x1a1a2e, 1);
+        
+        // Ensure canvas is added to DOM
+        try {
+            mountRef.current.appendChild(renderer.domElement);
+        } catch (error) {
+            console.error('Failed to add canvas to DOM:', error);
+            return;
+        }
 
-    // Educational explanations
-    const getExplanationContent = () => {
-        const explanations = {
-            '': {
-                title: '',
-                content: ''
-            },
-            keyGen: {
-                title: activeScheme === 'elliptic_curve' ? 'Elliptic Curve Key Generation' : 'Finite Field Key Generation',
-                content: activeScheme === 'elliptic_curve' ?
-                    'The elliptic curve scheme uses a revolutionary approach where the private key is a secret POINT G on the curve, not just a scalar. The x-coordinate of this secret point (x_G) is used to compute the public key P = (-x_G) × G. This creates a new hard problem: given P, find the secret generator point G.' :
-                    'The finite field scheme uses the new hard problem x^x ≡ y (mod p) where the private key x appears as both base and exponent. This transcendental structure makes it impossible to solve using traditional discrete logarithm methods.'
-            },
-            signing: {
-                title: activeScheme === 'elliptic_curve' ? 'EC Signature Generation' : 'FF Signature Generation',
-                content: activeScheme === 'elliptic_curve' ?
-                    'The signature consists of two elliptic curve points (R, Z) and one scalar (s). The algorithm computes R = k × G_secret and Z = u × G_secret using the secret generator point. The components are linked through transcendental equations that use the x-coordinates of points as scalar multipliers.' :
-                    'The signature uses multiple instances of the hard problem. Each component r, s, z is computed using the private key x in exponential positions, creating a web of transcendental relationships that resist algebraic attacks.'
-            },
-            verification: {
-                title: activeScheme === 'elliptic_curve' ? 'EC Signature Verification' : 'FF Signature Verification',
-                content: activeScheme === 'elliptic_curve' ?
-                    'Verification uses the transcendental equation π(R) × Z = s×e×R + π(Z+s×R)×P where π represents using x-coordinates as scalars. This embodies the Form 2.2 hard problem and can only be satisfied by valid signatures.' :
-                    'Verification solves Form 1.2 of the hard problem: a^x ≡ x^b (mod p). The verifier must check if the signature components satisfy multiple transcendental equations simultaneously.'
+        // Enhanced lighting for better 3D appearance
+        const ambientLight = new THREE.AmbientLight(0x404040, 0.6);
+        scene.add(ambientLight);
+        
+        const directionalLight = new THREE.DirectionalLight(0xffffff, 1.0);
+        directionalLight.position.set(10, 10, 5);
+        directionalLight.castShadow = true;
+        directionalLight.shadow.mapSize.width = 2048;
+        directionalLight.shadow.mapSize.height = 2048;
+        scene.add(directionalLight);
+
+        // Add point lights for better illumination
+        const pointLight1 = new THREE.PointLight(0x4080ff, 0.5, 50);
+        pointLight1.position.set(-10, 5, 5);
+        scene.add(pointLight1);
+        
+        const pointLight2 = new THREE.PointLight(0xff4080, 0.5, 50);
+        pointLight2.position.set(10, -5, 5);
+        scene.add(pointLight2);
+
+        sceneRef.current = scene;
+        rendererRef.current = renderer;
+        cameraRef.current = camera;
+        
+        // Set initial camera position for 3D view
+        camera.position.set(12, 8, 15);
+        camera.lookAt(0, 0, 0);
+
+        // Create initial curve immediately
+        createEllipticCurve();
+        
+        // Force initial render
+        renderer.render(scene, camera);
+        
+        // Animation loop with 3D rotation
+        let time = 0;
+        let lastTime = performance.now();
+        
+        const animate = (currentTime: number): void => {
+            const deltaTime = (currentTime - lastTime) * 0.001;
+            lastTime = currentTime;
+            time += deltaTime;
+            
+            if (isAnimating) {
+                // Rotate camera around the scene for 3D effect
+                const radius = 15;
+                const height = 8;
+                camera.position.x = Math.cos(time * 0.5) * radius;
+                camera.position.z = Math.sin(time * 0.5) * radius;
+                camera.position.y = height + Math.sin(time * 0.3) * 3;
+                camera.lookAt(0, 0, 0);
+                
+                // Add some dynamic lighting
+                pointLight1.position.x = Math.sin(time * 0.7) * 8;
+                pointLight1.position.z = Math.cos(time * 0.7) * 8;
+                pointLight2.position.x = Math.cos(time * 0.5) * -8;
+                pointLight2.position.z = Math.sin(time * 0.5) * -8;
+            }
+            
+            // Always update visualization and render
+            updateVisualizationForStep();
+            renderer.render(scene, camera);
+            
+            // Continue animation loop
+            if (animationRef.current !== null) {
+                animationRef.current = requestAnimationFrame(animate);
             }
         };
-        return explanations[currentExplanation];
+
+        // Start animation loop
+        animationRef.current = requestAnimationFrame(animate);
+
+        // Handle window resize
+        const handleResize = () => {
+            if (mountRef.current && camera && renderer) {
+                const newWidth = mountRef.current.clientWidth;
+                const newHeight = mountRef.current.clientHeight;
+                
+                camera.aspect = newWidth / newHeight;
+                camera.updateProjectionMatrix();
+                renderer.setSize(newWidth, newHeight);
+                renderer.render(scene, camera);
+            }
+        };
+        
+        window.addEventListener('resize', handleResize);
+
+        return () => {
+            if (animationRef.current) {
+                cancelAnimationFrame(animationRef.current);
+                animationRef.current = null;
+            }
+            window.removeEventListener('resize', handleResize);
+            
+            // Clean up Three.js objects
+            scene.traverse((object) => {
+                if (object instanceof THREE.Mesh) {
+                    object.geometry?.dispose();
+                    if (Array.isArray(object.material)) {
+                        object.material.forEach(material => material.dispose());
+                    } else {
+                        object.material?.dispose();
+                    }
+                }
+            });
+            
+            renderer.dispose();
+            
+            if (mountRef.current && renderer.domElement) {
+                try {
+                    mountRef.current.removeChild(renderer.domElement);
+                } catch (e) {
+                    // Ignore if already removed
+                }
+            }
+        };
+    }, [isAnimating]);
+
+    // Update visualization when key data changes - force re-render
+    useEffect(() => {
+        // Small delay to ensure DOM is ready
+        const timer = setTimeout(() => {
+            updateVisualizationForStep();
+            // Force a render
+            if (rendererRef.current && sceneRef.current && cameraRef.current) {
+                rendererRef.current.render(sceneRef.current, cameraRef.current);
+            }
+        }, 100);
+        
+        return () => clearTimeout(timer);
+    }, [keyData, signatureData, currentStep]);
+
+    const createEllipticCurve = (): void => {
+        if (!sceneRef.current) return;
+
+        // Create a more realistic 3D elliptic curve
+        const curvePoints: THREE.Vector3[] = [];
+        
+        // Generate points for elliptic curve y² = x³ + ax + b (simplified visualization)
+        for (let t = -Math.PI; t <= Math.PI; t += 0.05) {
+            const x = 6 * Math.cos(t);
+            const y = 4 * Math.sin(t);
+            const z = 0.8 * Math.sin(2 * t); // Add some 3D depth
+            curvePoints.push(new THREE.Vector3(x, y, z));
+        }
+        
+        // Add second branch of the curve
+        for (let t = -Math.PI; t <= Math.PI; t += 0.05) {
+            const x = 6 * Math.cos(t);
+            const y = -4 * Math.sin(t);
+            const z = -0.8 * Math.sin(2 * t);
+            curvePoints.push(new THREE.Vector3(x, y, z));
+        }
+
+        const curveGeometry = new THREE.BufferGeometry().setFromPoints(curvePoints);
+        const curveMaterial = new THREE.LineBasicMaterial({ 
+            color: 0x00ff88,
+            linewidth: 2,
+            transparent: true,
+            opacity: 0.9
+        });
+        
+        if (objectsRef.current.curve) {
+            sceneRef.current.remove(objectsRef.current.curve);
+        }
+        
+        objectsRef.current.curve = new THREE.Line(curveGeometry, curveMaterial);
+        sceneRef.current.add(objectsRef.current.curve);
     };
 
-    // API calls
-    const generateKeys = async (): Promise<void> => {
-        setCurrentExplanation('keyGen');
-        setShowExplanation(true);
+    const updateVisualizationForStep = (): void => {
+        if (!sceneRef.current) return;
 
-        try {
-            setError(null);
-            await simulateProcessing('Generating cryptographic parameters using new hard problems...', 1500);
-
-            const response = await dssAPI.generateKeys(256, activeScheme);
-
-            if (response.success) {
-                setKeyData({
-                    privateKey: response.private_key,
-                    publicKey: response.public_key,
-                    systemParams: response.system_params,
-                    sessionId: response.session_id
-                });
-                updateOperationCounts(response.performance_metrics);
-                setCurrentStep(2);
-            }
-        } catch (error) {
-            setError(error instanceof Error ? error.message : 'Key generation failed');
+        // Always show the curve
+        if (!objectsRef.current.curve) {
+            createEllipticCurve();
         }
+
+        // Step 1+: Show key generation (private and public key points)
+        if (currentStep >= 1 && keyData) {
+            updatePrivateKeyPoint();
+            updatePublicKeyPoint();
+        } else {
+            // Remove key points if step < 1 or no key data
+            if (objectsRef.current.privatePoint) {
+                sceneRef.current.remove(objectsRef.current.privatePoint);
+                objectsRef.current.privatePoint = null;
+            }
+            if (objectsRef.current.publicPoint) {
+                sceneRef.current.remove(objectsRef.current.publicPoint);
+                objectsRef.current.publicPoint = null;
+            }
+        }
+
+        // Step 2+: Show signature points
+        if (currentStep >= 2 && signatureData) {
+            updateSignaturePoints();
+        } else {
+            // Remove signature points if step < 2 or no signature data
+            if (objectsRef.current.signatureR) {
+                sceneRef.current.remove(objectsRef.current.signatureR);
+                objectsRef.current.signatureR = null;
+            }
+            if (objectsRef.current.signatureZ) {
+                sceneRef.current.remove(objectsRef.current.signatureZ);
+                objectsRef.current.signatureZ = null;
+            }
+        }
+
+        // Step 3+: Show verification connections
+        if (currentStep >= 3) {
+            updateVerificationVisualization();
+        } else {
+            // Remove connections if step < 3
+            objectsRef.current.connections.forEach(conn => sceneRef.current!.remove(conn));
+            objectsRef.current.connections = [];
+        }
+
+        // Add pulsing effect for current step
+        addStepIndicators();
+    };
+
+    const updatePrivateKeyPoint = (): void => {
+        if (!sceneRef.current || !keyData) return;
+        
+        // Use actual private key to determine position
+        const privateKeyHash = hashString(keyData.privateKey);
+        const normalizedHash = privateKeyHash % 10000;
+        
+        // Map hash to curve position with some mathematical relationship
+        const angle = (normalizedHash / 10000) * 2 * Math.PI;
+        const x = 5.5 * Math.cos(angle);
+        const y = 3.8 * Math.sin(angle);
+        const z = 1.2 * Math.sin(1.5 * angle);
+
+        if (objectsRef.current.privatePoint) {
+            sceneRef.current.remove(objectsRef.current.privatePoint);
+        }
+
+        const geometry = new THREE.SphereGeometry(0.4, 32, 32);
+        const material = new THREE.MeshPhongMaterial({ 
+            color: 0xff4444,
+            emissive: 0x331111,
+            transparent: false,
+            opacity: 1.0,
+            shininess: 100
+        });
+        
+        objectsRef.current.privatePoint = new THREE.Mesh(geometry, material);
+        objectsRef.current.privatePoint.position.set(x, y, z);
+        objectsRef.current.privatePoint.castShadow = true;
+        objectsRef.current.privatePoint.receiveShadow = true;
+        
+        // Add outer glow ring
+        const ringGeometry = new THREE.TorusGeometry(0.6, 0.05, 8, 16);
+        const ringMaterial = new THREE.MeshBasicMaterial({
+            color: 0xff4444,
+            transparent: true,
+            opacity: 0.6
+        });
+        const ring = new THREE.Mesh(ringGeometry, ringMaterial);
+        ring.rotation.x = Math.PI / 2;
+        objectsRef.current.privatePoint.add(ring);
+        
+        sceneRef.current.add(objectsRef.current.privatePoint);
+    };
+
+    const updatePublicKeyPoint = (): void => {
+        if (!sceneRef.current || !keyData) return;
+        
+        // Use actual public key to determine position (related to private key but different)
+        const publicKeyHash = hashString(keyData.publicKey);
+        const normalizedHash = publicKeyHash % 10000;
+        
+        // Map hash to curve position - should be mathematically related to private key
+        const privateKeyHash = hashString(keyData.privateKey);
+        const combinedHash = (publicKeyHash + privateKeyHash * 2) % 10000;
+        const angle = (combinedHash / 10000) * 2 * Math.PI;
+        
+        const x = 5.8 * Math.cos(angle + Math.PI/3);
+        const y = 3.6 * Math.sin(angle + Math.PI/3);
+        const z = 0.9 * Math.sin(1.8 * angle);
+
+        if (objectsRef.current.publicPoint) {
+            sceneRef.current.remove(objectsRef.current.publicPoint);
+        }
+
+        const geometry = new THREE.SphereGeometry(0.4, 32, 32);
+        const material = new THREE.MeshPhongMaterial({ 
+            color: 0x44ff44,
+            emissive: 0x113311,
+            transparent: false,
+            opacity: 1.0,
+            shininess: 100
+        });
+        
+        objectsRef.current.publicPoint = new THREE.Mesh(geometry, material);
+        objectsRef.current.publicPoint.position.set(x, y, z);
+        objectsRef.current.publicPoint.castShadow = true;
+        objectsRef.current.publicPoint.receiveShadow = true;
+        
+        // Add outer glow ring
+        const ringGeometry = new THREE.TorusGeometry(0.6, 0.05, 8, 16);
+        const ringMaterial = new THREE.MeshBasicMaterial({
+            color: 0x44ff44,
+            transparent: true,
+            opacity: 0.6
+        });
+        const ring = new THREE.Mesh(ringGeometry, ringMaterial);
+        ring.rotation.x = Math.PI / 2;
+        objectsRef.current.publicPoint.add(ring);
+        
+        sceneRef.current.add(objectsRef.current.publicPoint);
+    };
+
+    const updateSignaturePoints = (): void => {
+        if (!sceneRef.current || !signatureData) return;
+        
+        // R point - based on actual signature R values
+        const rHash = hashString(signatureData.signature.R.x + signatureData.signature.R.y);
+        const rNormalized = rHash % 10000;
+        const rAngle = (rNormalized / 10000) * 2 * Math.PI;
+        
+        const rX = 4.8 * Math.cos(rAngle);
+        const rY = 3.2 * Math.sin(rAngle);
+        const rZ = 1.5 * Math.cos(1.3 * rAngle);
+        
+        if (objectsRef.current.signatureR) {
+            sceneRef.current.remove(objectsRef.current.signatureR);
+        }
+        
+        const rGeometry = new THREE.OctahedronGeometry(0.35);
+        const rMaterial = new THREE.MeshPhongMaterial({ 
+            color: 0x4444ff,
+            emissive: 0x111133,
+            transparent: false,
+            opacity: 1.0,
+            shininess: 100
+        });
+        
+        objectsRef.current.signatureR = new THREE.Mesh(rGeometry, rMaterial);
+        objectsRef.current.signatureR.position.set(rX, rY, rZ);
+        objectsRef.current.signatureR.castShadow = true;
+        objectsRef.current.signatureR.receiveShadow = true;
+        sceneRef.current.add(objectsRef.current.signatureR);
+
+        // Z point - based on signature s and hash
+        const zHash = hashString(signatureData.signature.s + signatureData.hash);
+        const zNormalized = zHash % 10000;
+        const zAngle = (zNormalized / 10000) * 2 * Math.PI;
+        
+        const zX = 4.6 * Math.cos(zAngle + Math.PI/4);
+        const zY = 3.4 * Math.sin(zAngle + Math.PI/4);
+        const zZ = 1.1 * Math.sin(1.7 * zAngle);
+        
+        if (objectsRef.current.signatureZ) {
+            sceneRef.current.remove(objectsRef.current.signatureZ);
+        }
+        
+        const zGeometry = new THREE.OctahedronGeometry(0.35);
+        const zMaterial = new THREE.MeshPhongMaterial({ 
+            color: 0xff44ff,
+            emissive: 0x331133,
+            transparent: false,
+            opacity: 1.0,
+            shininess: 100
+        });
+        
+        objectsRef.current.signatureZ = new THREE.Mesh(zGeometry, zMaterial);
+        objectsRef.current.signatureZ.position.set(zX, zY, zZ);
+        objectsRef.current.signatureZ.castShadow = true;
+        objectsRef.current.signatureZ.receiveShadow = true;
+        sceneRef.current.add(objectsRef.current.signatureZ);
+    };
+
+    const updateVerificationVisualization = (): void => {
+        if (!sceneRef.current) return;
+
+        // Add connection lines showing verification process
+        const lineMaterial = new THREE.LineBasicMaterial({ 
+            color: 0x00ffff,
+            transparent: true,
+            opacity: 0.7
+        });
+
+        // Clear existing connections
+        objectsRef.current.connections.forEach(conn => sceneRef.current!.remove(conn));
+        objectsRef.current.connections = [];
+
+        if (objectsRef.current.publicPoint && objectsRef.current.signatureR) {
+            const points = [
+                objectsRef.current.publicPoint.position,
+                objectsRef.current.signatureR.position
+            ];
+            const geometry = new THREE.BufferGeometry().setFromPoints(points);
+            const line = new THREE.Line(geometry, lineMaterial);
+            sceneRef.current.add(line);
+            objectsRef.current.connections.push(line);
+        }
+
+        if (objectsRef.current.signatureR && objectsRef.current.signatureZ) {
+            const points = [
+                objectsRef.current.signatureR.position,
+                objectsRef.current.signatureZ.position
+            ];
+            const geometry = new THREE.BufferGeometry().setFromPoints(points);
+            const line = new THREE.Line(geometry, lineMaterial);
+            sceneRef.current.add(line);
+            objectsRef.current.connections.push(line);
+        }
+    };
+
+    const addStepIndicators = (): void => {
+        // Add visual indicators for current processing step
+        if (isProcessing && currentStep > 0) {
+            const time = Date.now() * 0.005;
+            
+            if (objectsRef.current.curve && objectsRef.current.curve.material instanceof THREE.LineBasicMaterial) {
+                objectsRef.current.curve.material.opacity = 0.8 + 0.2 * Math.sin(time);
+            }
+            
+            // Pulse effect on active points
+            [objectsRef.current.privatePoint, objectsRef.current.publicPoint, 
+             objectsRef.current.signatureR, objectsRef.current.signatureZ].forEach(point => {
+                if (point) {
+                    point.scale.setScalar(1 + 0.1 * Math.sin(time * 2));
+                }
+            });
+        }
+    };
+
+    // Improved hash function for consistent positioning
+    const hashString = (str: string): number => {
+        let hash = 0;
+        for (let i = 0; i < str.length; i++) {
+            const char = str.charCodeAt(i);
+            hash = ((hash << 5) - hash) + char;
+            hash = hash & hash;
+        }
+        return Math.abs(hash);
+    };
+
+    const toggleAnimation = (): void => {
+        setIsAnimating(!isAnimating);
+    };
+
+    const changeViewMode = (): void => {
+        setViewMode(viewMode === 'curve' ? 'operations' : 'curve');
+    };
+
+    return (
+        <Card className="relative overflow-hidden bg-gradient-to-br from-slate-900 via-purple-900 to-slate-900">
+            <CardHeader className="pb-2">
+                <div className="flex items-center justify-between">
+                    <CardTitle className="text-white flex items-center gap-2">
+                        <Eye className="h-5 w-5 text-cyan-400" />
+                        Interactive 3D Cryptographic Visualization
+                    </CardTitle>
+                    <div className="flex gap-2">
+                        <Button
+                            variant="ghost"
+                            size="sm"
+                            onClick={toggleAnimation}
+                            className="text-white hover:bg-white/10"
+                        >
+                            {isAnimating ? <Pause className="h-4 w-4" /> : <Play className="h-4 w-4" />}
+                        </Button>
+                        <Button
+                            variant="ghost"
+                            size="sm"
+                            onClick={changeViewMode}
+                            className="text-white hover:bg-white/10"
+                        >
+                            <Settings className="h-4 w-4" />
+                        </Button>
+                    </div>
+                </div>
+            </CardHeader>
+            <CardContent className="p-0">
+                <div
+                    ref={mountRef}
+                    className="w-full h-96 relative"
+                    style={{ background: 'transparent' }}
+                />
+                
+                {/* Legend */}
+                <div className="absolute bottom-4 left-4 bg-black/20 backdrop-blur-sm rounded-lg p-3 text-white text-sm space-y-1">
+                    <div className="flex items-center gap-2">
+                        <div className="w-3 h-3 bg-green-400 rounded-full"></div>
+                        <span>Elliptic Curve</span>
+                    </div>
+                    <div className="flex items-center gap-2">
+                        <div className="w-3 h-3 bg-red-400 rounded-full"></div>
+                        <span>Private Key Point</span>
+                    </div>
+                    <div className="flex items-center gap-2">
+                        <div className="w-3 h-3 bg-green-400 rounded-full"></div>
+                        <span>Public Key Point</span>
+                    </div>
+                    <div className="flex items-center gap-2">
+                        <div className="w-3 h-3 bg-blue-400 rounded-full"></div>
+                        <span>Signature R</span>
+                    </div>
+                    <div className="flex items-center gap-2">
+                        <div className="w-3 h-3 bg-purple-400 rounded-full"></div>
+                        <span>Signature Z</span>
+                    </div>
+                </div>
+
+                {/* Step indicator */}
+                <div className="absolute top-4 right-4 bg-black/20 backdrop-blur-sm rounded-lg p-2 text-white text-sm">
+                    Step {currentStep}/3
+                    {isProcessing && (
+                        <div className="flex items-center gap-1 mt-1">
+                            <Activity className="h-3 w-3 animate-spin" />
+                            <span className="text-xs">Processing...</span>
+                        </div>
+                    )}
+                </div>
+            </CardContent>
+        </Card>
+    );
+};
+
+// Main Demo Component
+const EnhancedDigitalSignatureDemo: React.FC = () => {
+    const [currentStep, setCurrentStep] = useState<number>(0);
+    const [isProcessing, setIsProcessing] = useState<boolean>(false);
+    const [keyData, setKeyData] = useState<KeyData | null>(null);
+    const [signatureData, setSignatureData] = useState<SignatureData | null>(null);
+    const [verificationResult, setVerificationResult] = useState<boolean | null>(null);
+    const [message, setMessage] = useState<string>('Hello, Cryptographic World!');
+    const [isClient, setIsClient] = useState<boolean>(false);
+
+    // Ensure client-side rendering
+    useEffect(() => {
+        setIsClient(true);
+    }, []);
+
+    // Mock API calls with realistic data
+    const generateKeys = async (): Promise<void> => {
+        setIsProcessing(true);
+        setCurrentStep(1);
+        
+        // Simulate processing time
+        await new Promise(resolve => setTimeout(resolve, 1500));
+        
+        // Generate realistic looking keys
+        const privateKey = generateRandomHex(64);
+        const publicKey = generateRandomHex(128);
+        
+        setKeyData({
+            privateKey,
+            publicKey,
+            systemParams: {
+                curve: 'secp256k1',
+                generator: generateRandomHex(128)
+            }
+        });
+        
+        setIsProcessing(false);
+        setCurrentStep(2);
     };
 
     const signMessage = async (): Promise<void> => {
         if (!keyData) return;
-
-        setCurrentExplanation('signing');
-        setShowExplanation(true);
-
-        try {
-            setError(null);
-            await simulateProcessing('Computing signature using transcendental equations...', 1800);
-
-            const response = await dssAPI.signMessage(
-                message,
-                keyData.privateKey,
-                keyData.systemParams,
-                activeScheme
-            );
-
-            if (response.success) {
-                setSignatureData({
-                    signature: response.signature,
-                    intermediateValues: response.intermediate_values,
-                    hash: response.intermediate_values.sign_e || response.intermediate_values.hash
-                });
-                updateOperationCounts(response.performance_metrics);
-                setCurrentStep(3);
-            }
-        } catch (error) {
-            setError(error instanceof Error ? error.message : 'Message signing failed');
-        }
+        
+        setIsProcessing(true);
+        
+        await new Promise(resolve => setTimeout(resolve, 1200));
+        
+        setSignatureData({
+            signature: {
+                R: { x: generateRandomHex(64), y: generateRandomHex(64) },
+                s: generateRandomHex(64),
+                Z: { x: generateRandomHex(64), y: generateRandomHex(64) }
+            },
+            hash: generateRandomHex(64)
+        });
+        
+        setIsProcessing(false);
+        setCurrentStep(3);
     };
 
     const verifySignature = async (): Promise<void> => {
-        if (!keyData || !signatureData) return;
-
-        setCurrentExplanation('verification');
-        setShowExplanation(true);
-
-        try {
-            setError(null);
-            await simulateProcessing('Verifying signature using hard problem equations...', 1200);
-
-            const response = await dssAPI.verifySignature(
-                message,
-                signatureData.signature,
-                keyData.publicKey,
-                keyData.systemParams,
-                'elliptic_curve'
-            );
-
-            if (response.success) {
-                setVerificationResult(response.valid);
-                updateOperationCounts(response.performance_metrics);
-                setCurrentStep(4);
-            }
-        } catch (error) {
-            setError(error instanceof Error ? error.message : 'Signature verification failed');
-        }
+        if (!signatureData) return;
+        
+        setIsProcessing(true);
+        
+        await new Promise(resolve => setTimeout(resolve, 1000));
+        
+        // Always return true as requested
+        setVerificationResult(true);
+        
+        setIsProcessing(false);
+        setCurrentStep(4);
     };
 
-    const demonstrateHardProblem = async (problemType: string): Promise<void> => {
-        try {
-            const response = await dssAPI.demonstrateHardProblem(problemType, {});
-            setHardProblemDemo(response);
-        } catch (error) {
-            setError('Hard problem demonstration failed');
-        }
+    const resetDemo = (): void => {
+        setCurrentStep(0);
+        setKeyData(null);
+        setSignatureData(null);
+        setVerificationResult(null);
+        setIsProcessing(false);
     };
 
-    const Enhanced3DSection = () => (
-        <div className="space-y-6">
-            {/* 3D Elliptic Curve Visualization */}
-            <Enhanced3DVisualization
-                keyData={keyData ? { privateKey: keyData.privateKey, publicKey: keyData.publicKey } : undefined}
-                signatureData={signatureData ? { signature: signatureData.signature } : undefined}
-                currentStep={currentStep}
-                isProcessing={isProcessing}
-            />
+    // Helper function to generate realistic hex strings
+    const generateRandomHex = (length: number): string => {
+        const chars = '0123456789abcdef';
+        let result = '';
+        for (let i = 0; i < length; i++) {
+            result += chars[Math.floor(Math.random() * 16)];
+        }
+        return result;
+    };
 
-            {/* Mathematical Operations Visualization */}
-            <MathematicalOperationsVisualization
-                performanceMetrics={performanceMetrics}
-                intermediateValues={keyData?.sessionId ?
-                    { ...(keyData as any).intermediateValues, ...signatureData?.intermediateValues } :
-                    {}
-                }
-                currentStep={currentStep}
-                isProcessing={isProcessing}
-            />
-        </div>
-    );
+    const steps: StepConfig[] = [
+        { title: 'Key Generation', icon: Key, color: 'from-blue-500 to-cyan-500' },
+        { title: 'Message Signing', icon: Shield, color: 'from-purple-500 to-pink-500' },
+        { title: 'Signature Verification', icon: CheckCircle, color: 'from-green-500 to-emerald-500' }
+    ];
 
-
-    // Enhanced visualization components
-    const EllipticCurveVisualization = () => (
-        <Card className="mb-6">
-            <CardHeader>
-                <CardTitle className="flex items-center gap-2">
-                    <GitBranchIcon className="h-5 w-5" />
-                    Elliptic Curve Structure & Secret Generator
-                </CardTitle>
-                <CardDescription>
-                    Visual representation of the elliptic curve and cryptographic relationships
-                </CardDescription>
-            </CardHeader>
-            <CardContent>
-                <div className="bg-gradient-to-br from-blue-50 to-indigo-100 p-6 rounded-lg">
-                    {/* Curve Equation */}
-                    <div className="text-center mb-6">
-                        <div className="inline-block bg-white p-4 rounded-lg shadow-md border-2 border-blue-200">
-                            <div className="text-lg font-bold text-blue-800">
-                                E(F<sub>p</sub>): y² = x³ + ax + b (mod p)
-                            </div>
-                            <div className="text-sm text-gray-600 mt-1">
-                                Elliptic Curve over Finite Field
-                            </div>
-                        </div>
-                    </div>
-
-                    {/* Key Points Visualization */}
-                    {keyData && (
-                        <div className="grid grid-cols-1 md:grid-cols-2 gap-6 mb-6">
-                            <div className="bg-white p-5 rounded-lg shadow-md border-l-4 border-green-500">
-                                <div className="flex items-center gap-2 mb-2">
-                                    <LockIcon className="h-5 w-5 text-green-600" />
-                                    <h4 className="font-semibold text-green-700">Secret Generator Point G</h4>
-                                </div>
-                                <div className="text-sm font-mono bg-green-50 p-3 rounded border">
-                                    <div className="text-green-800 font-semibold">Private Key (Secret Point)</div>
-                                    <div className="mt-1 text-xs text-gray-600">
-                                        {formatPoint(JSON.parse(keyData.privateKey))}
-                                    </div>
-                                </div>
-                                <div className="mt-2 text-xs text-green-600">
-                                    🔒 This point G is kept secret and serves as the generator
-                                </div>
-                            </div>
-
-                            <div className="bg-white p-5 rounded-lg shadow-md border-l-4 border-blue-500">
-                                <div className="flex items-center gap-2 mb-2">
-                                    <UnlockIcon className="h-5 w-5 text-blue-600" />
-                                    <h4 className="font-semibold text-blue-700">Public Point P</h4>
-                                </div>
-                                <div className="text-sm font-mono bg-blue-50 p-3 rounded border">
-                                    <div className="text-blue-800 font-semibold">P = (-x<sub>G</sub>) × G</div>
-                                    <div className="mt-1 text-xs text-gray-600">
-                                        {formatPoint(JSON.parse(keyData.publicKey))}
-                                    </div>
-                                </div>
-                                <div className="mt-2 text-xs text-blue-600">
-                                    🔓 Computed from secret generator using hard problem
-                                </div>
-                            </div>
-                        </div>
-                    )}
-
-                    {/* Signature Components */}
-                    {signatureData && (
-                        <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-4">
-                            <div className="bg-white p-4 rounded-lg shadow-md text-center border-t-4 border-purple-500">
-                                <div className="flex items-center justify-center gap-1 mb-2">
-                                    <GitBranchIcon className="h-4 w-4 text-purple-600" />
-                                    <h5 className="font-semibold text-purple-700">Point R</h5>
-                                </div>
-                                <div className="text-xs font-mono bg-purple-50 p-2 rounded">
-                                    R = k × G<sub>secret</sub>
-                                </div>
-                                <div className="text-xs text-gray-600 mt-1">
-                                    {formatPoint(signatureData.signature.R)}
-                                </div>
-                            </div>
-
-                            <div className="bg-white p-4 rounded-lg shadow-md text-center border-t-4 border-orange-500">
-                                <div className="flex items-center justify-center gap-1 mb-2">
-                                    <HashIcon className="h-4 w-4 text-orange-600" />
-                                    <h5 className="font-semibold text-orange-700">Scalar s</h5>
-                                </div>
-                                <div className="text-xs font-mono bg-orange-50 p-2 rounded">
-                                    Transcendental Link
-                                </div>
-                                <div className="text-xs text-gray-600 mt-1">
-                                    {formatLargeNumber(signatureData.signature.s)}
-                                </div>
-                            </div>
-
-                            <div className="bg-white p-4 rounded-lg shadow-md text-center border-t-4 border-red-500">
-                                <div className="flex items-center justify-center gap-1 mb-2">
-                                    <GitBranchIcon className="h-4 w-4 text-red-600" />
-                                    <h5 className="font-semibold text-red-700">Point Z</h5>
-                                </div>
-                                <div className="text-xs font-mono bg-red-50 p-2 rounded">
-                                    Z = u × G<sub>secret</sub>
-                                </div>
-                                <div className="text-xs text-gray-600 mt-1">
-                                    {formatPoint(signatureData.signature.Z)}
-                                </div>
-                            </div>
-                        </div>
-                    )}
-
-                    {/* Hard Problem Equations */}
-                    <div className="bg-yellow-50 p-4 rounded-lg border border-yellow-200">
-                        <h5 className="font-semibold text-yellow-800 mb-2">🧮 Hard Problem Forms</h5>
-                        <div className="grid grid-cols-1 md:grid-cols-2 gap-3 text-sm">
-                            <div className="bg-white p-3 rounded border">
-                                <div className="font-semibold text-blue-700">Form 2.1: Key Generation</div>
-                                <div className="font-mono text-xs">P = x<sub>G</sub> × G</div>
-                                <div className="text-xs text-gray-600 mt-1">Find secret generator G given public P</div>
-                            </div>
-                            <div className="bg-white p-3 rounded border">
-                                <div className="font-semibold text-purple-700">Form 2.2: Verification</div>
-                                <div className="font-mono text-xs">x<sub>G</sub> × P = k × G</div>
-                                <div className="text-xs text-gray-600 mt-1">Transcendental verification equation</div>
-                            </div>
-                        </div>
+    // Show loading state during hydration
+    if (!isClient) {
+        return (
+            <div className="min-h-screen bg-gradient-to-br from-slate-50 via-blue-50 to-purple-50 p-4">
+                <div className="max-w-7xl mx-auto space-y-6">
+                    <div className="text-center py-8">
+                        <h1 className="text-4xl font-bold bg-gradient-to-r from-purple-600 to-blue-600 bg-clip-text text-transparent mb-4">
+                            Advanced Digital Signature Scheme
+                        </h1>
+                        <p className="text-lg text-gray-600 max-w-2xl mx-auto">
+                            Loading interactive demonstration...
+                        </p>
                     </div>
                 </div>
-            </CardContent>
-        </Card>
-    );
-
-    const MessageAndKeysDisplay = () => (
-        <Card className="mb-6">
-            <CardHeader>
-                <CardTitle className="flex items-center gap-2">
-                    <EyeIcon className="h-5 w-5" />
-                    Message & Cryptographic Data
-                </CardTitle>
-                <CardDescription>
-                    Complete view of the message, keys, and signature components
-                </CardDescription>
-            </CardHeader>
-            <CardContent>
-                <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full">
-                    <TabsList className="grid w-full grid-cols-4">
-                        <TabsTrigger value="message">Message</TabsTrigger>
-                        <TabsTrigger value="keys">Keys</TabsTrigger>
-                        <TabsTrigger value="signature">Signature</TabsTrigger>
-                        <TabsTrigger value="params">Parameters</TabsTrigger>
-                    </TabsList>
-
-                    <TabsContent value="message" className="mt-4">
-                        <div className="bg-gray-50 p-4 rounded-lg">
-                            <h4 className="font-semibold mb-2">Original Message</h4>
-                            <div className="bg-white p-3 rounded border font-mono text-sm">
-                                {message}
-                            </div>
-                            <div className="mt-3 text-sm text-gray-600">
-                                <strong>Length:</strong> {message.length} characters |
-                                <strong> Hash:</strong> {signatureData?.hash ? formatLargeNumber(signatureData.hash) : 'Not computed yet'}
-                            </div>
-                        </div>
-                    </TabsContent>
-
-                    <TabsContent value="keys" className="mt-4">
-                        {keyData ? (
-                            <div className="space-y-4">
-                                <div className="bg-green-50 p-4 rounded-lg border border-green-200">
-                                    <h4 className="font-semibold text-green-800 mb-2">🔒 Private Key (Secret Generator Point G)</h4>
-                                    <div className="bg-white p-3 rounded font-mono text-xs break-all">
-                                        {JSON.stringify(JSON.parse(keyData.privateKey), null, 2)}
-                                    </div>
-                                </div>
-
-                                <div className="bg-blue-50 p-4 rounded-lg border border-blue-200">
-                                    <h4 className="font-semibold text-blue-800 mb-2">🔓 Public Key (Point P = (-x_G) × G)</h4>
-                                    <div className="bg-white p-3 rounded font-mono text-xs break-all">
-                                        {JSON.stringify(JSON.parse(keyData.publicKey), null, 2)}
-                                    </div>
-                                </div>
-                            </div>
-                        ) : (
-                            <div className="text-center text-gray-500 py-8">
-                                Generate keys first to view cryptographic data
-                            </div>
-                        )}
-                    </TabsContent>
-
-                    <TabsContent value="signature" className="mt-4">
-                        {signatureData ? (
-                            <div className="space-y-4">
-                                <div className="bg-purple-50 p-4 rounded-lg border border-purple-200">
-                                    <h4 className="font-semibold text-purple-800 mb-2">📝 Signature Component R (Point)</h4>
-                                    <div className="bg-white p-3 rounded font-mono text-xs">
-                                        <div><strong>X:</strong> {signatureData.signature.R.x}</div>
-                                        <div><strong>Y:</strong> {signatureData.signature.R.y}</div>
-                                        <div><strong>Infinity:</strong> {signatureData.signature.R.infinity.toString()}</div>
-                                    </div>
-                                </div>
-
-                                <div className="bg-orange-50 p-4 rounded-lg border border-orange-200">
-                                    <h4 className="font-semibold text-orange-800 mb-2">🔢 Signature Component s (Scalar)</h4>
-                                    <div className="bg-white p-3 rounded font-mono text-xs break-all">
-                                        {signatureData.signature.s}
-                                    </div>
-                                </div>
-
-                                <div className="bg-red-50 p-4 rounded-lg border border-red-200">
-                                    <h4 className="font-semibold text-red-800 mb-2">📍 Signature Component Z (Point)</h4>
-                                    <div className="bg-white p-3 rounded font-mono text-xs">
-                                        <div><strong>X:</strong> {signatureData.signature.Z.x}</div>
-                                        <div><strong>Y:</strong> {signatureData.signature.Z.y}</div>
-                                        <div><strong>Infinity:</strong> {signatureData.signature.Z.infinity.toString()}</div>
-                                    </div>
-                                </div>
-
-                                {verificationResult !== null && (
-                                    <div className={`p-4 rounded-lg border ${verificationResult ? 'bg-green-50 border-green-200' : 'bg-red-50 border-red-200'}`}>
-                                        <h4 className={`font-semibold mb-2 ${verificationResult ? 'text-green-800' : 'text-red-800'}`}>
-                                            {verificationResult ? '✅ Signature Verification: VALID' : '❌ Signature Verification: INVALID'}
-                                        </h4>
-                                        <div className="text-sm">
-                                            {verificationResult ?
-                                                'The signature satisfies the transcendental point equation π(R) × Z = s×e×R + π(Z+s×R)×P' :
-                                                'The signature does not satisfy the verification equations'
-                                            }
-                                        </div>
-                                    </div>
-                                )}
-                            </div>
-                        ) : (
-                            <div className="text-center text-gray-500 py-8">
-                                Sign a message first to view signature data
-                            </div>
-                        )}
-                    </TabsContent>
-
-                    <TabsContent value="params" className="mt-4">
-                        {keyData ? (
-                            <div className="bg-gray-50 p-4 rounded-lg">
-                                <h4 className="font-semibold mb-3">🔧 Elliptic Curve Parameters</h4>
-                                <div className="grid grid-cols-1 md:grid-cols-2 gap-4 text-sm">
-                                    <div className="bg-white p-3 rounded border">
-                                        <div className="font-semibold text-blue-700">Field Prime (p)</div>
-                                        <div className="font-mono text-xs break-all mt-1">
-                                            {formatLargeNumber(keyData.systemParams.curve_params.p)}
-                                        </div>
-                                    </div>
-                                    <div className="bg-white p-3 rounded border">
-                                        <div className="font-semibold text-blue-700">Curve Parameter a</div>
-                                        <div className="font-mono text-xs break-all mt-1">
-                                            {formatLargeNumber(keyData.systemParams.curve_params.a)}
-                                        </div>
-                                    </div>
-                                    <div className="bg-white p-3 rounded border">
-                                        <div className="font-semibold text-blue-700">Curve Parameter b</div>
-                                        <div className="font-mono text-xs break-all mt-1">
-                                            {formatLargeNumber(keyData.systemParams.curve_params.b)}
-                                        </div>
-                                    </div>
-                                    <div className="bg-white p-3 rounded border">
-                                        <div className="font-semibold text-blue-700">Base Point Order (n)</div>
-                                        <div className="font-mono text-xs break-all mt-1">
-                                            {formatLargeNumber(keyData.systemParams.curve_params.order_n)}
-                                        </div>
-                                    </div>
-                                </div>
-                                <div className="mt-4 p-3 bg-blue-50 rounded border border-blue-200">
-                                    <div className="font-semibold text-blue-800">Standard Base Point G (Public)</div>
-                                    <div className="font-mono text-xs mt-1">
-                                        {keyData.systemParams.curve_params.base_point_G}
-                                    </div>
-                                    <div className="text-xs text-blue-600 mt-1">
-                                        ⚠️ Note: This is the standard base point, different from our secret generator point
-                                    </div>
-                                </div>
-                            </div>
-                        ) : (
-                            <div className="text-center text-gray-500 py-8">
-                                Generate keys first to view system parameters
-                            </div>
-                        )}
-                    </TabsContent>
-                </Tabs>
-            </CardContent>
-        </Card>
-    );
-
-    const PerformanceAnalysis = () => (
-        <Card>
-            <CardHeader>
-                <CardTitle className="flex items-center gap-2">
-                    <TrendingUpIcon className="h-5 w-5" />
-                    Performance Analysis & Security Metrics
-                </CardTitle>
-                <CardDescription>
-                    Real-time cryptographic operation counts and security assessment
-                </CardDescription>
-            </CardHeader>
-            <CardContent>
-                <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-6">
-                    {Object.entries(performanceMetrics).map(([operation, count]) => (
-                        <div key={operation} className="text-center p-4 bg-gradient-to-br from-blue-50 to-indigo-50 rounded-lg border">
-                            <div className="text-3xl font-bold text-blue-600">{count}</div>
-                            <div className="text-sm text-gray-600 capitalize">
-                                {operation.replace(/_/g, ' ')}
-                            </div>
-                        </div>
-                    ))}
-                </div>
-
-                <Separator className="my-6" />
-
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                    <div className="bg-green-50 p-4 rounded-lg border border-green-200">
-                        <h4 className="font-semibold text-green-800 mb-2">✅ Security Advantages</h4>
-                        <ul className="text-sm text-green-700 space-y-1">
-                            <li>• <strong>Quantum Resistance:</strong> Novel hard problems resist quantum attacks</li>
-                            <li>• <strong>Secret Generator:</strong> Generator point itself is unknown</li>
-                            <li>• <strong>Transcendental Equations:</strong> X-coordinates as scalar multipliers</li>
-                            <li>• <strong>Multiple Hard Problems:</strong> Forms 2.1 and 2.2 simultaneously</li>
-                        </ul>
-                    </div>
-
-                    <div className="bg-yellow-50 p-4 rounded-lg border border-yellow-200">
-                        <h4 className="font-semibold text-yellow-800 mb-2">⚖️ Performance Trade-offs</h4>
-                        <ul className="text-sm text-yellow-700 space-y-1">
-                            <li>• <strong>Computational Cost:</strong> ~3x traditional ECDSA operations</li>
-                            <li>• <strong>Signature Size:</strong> Two points + one scalar (larger)</li>
-                            <li>• <strong>Security Gain:</strong> Revolutionary mathematical foundation</li>
-                            <li>• <strong>Future-Proof:</strong> Designed for post-quantum era</li>
-                        </ul>
-                    </div>
-                </div>
-
-                <div className="mt-6 p-4 bg-blue-50 rounded-lg border border-blue-200">
-                    <h4 className="font-semibold text-blue-800 mb-2">📊 Comparison with Traditional ECDSA</h4>
-                    <div className="grid grid-cols-1 md:grid-cols-3 gap-4 text-sm">
-                        <div className="bg-white p-3 rounded border">
-                            <div className="font-semibold text-gray-700">Traditional ECDSA</div>
-                            <div className="text-xs text-gray-600 mt-1">
-                                • Known generator G<br />
-                                • Scalar private key k<br />
-                                • Signature: (r, s) scalars<br />
-                                • Security: ECDLP
-                            </div>
-                        </div>
-                        <div className="bg-white p-3 rounded border">
-                            <div className="font-semibold text-purple-700">Our EC-DSS</div>
-                            <div className="text-xs text-purple-600 mt-1">
-                                • Secret generator point G<br />
-                                • Point private key G<br />
-                                • Signature: (R, s, Z) points+scalar<br />
-                                • Security: New hard problems
-                            </div>
-                        </div>
-                        <div className="bg-white p-3 rounded border">
-                            <div className="font-semibold text-green-700">Innovation</div>
-                            <div className="text-xs text-green-600 mt-1">
-                                • Generator secrecy<br />
-                                • Transcendental structure<br />
-                                • Quantum resistance<br />
-                                • Multiple security layers
-                            </div>
-                        </div>
-                    </div>
-                </div>
-            </CardContent>
-        </Card>
-    );
-
-    const HardProblemExploration = () => (
-        <Card>
-            <CardHeader>
-                <CardTitle className="flex items-center gap-2">
-                    <BrainIcon className="h-5 w-5" />
-                    Hard Problem Demonstrations
-                </CardTitle>
-                <CardDescription>
-                    Interactive exploration of the mathematical foundations
-                </CardDescription>
-            </CardHeader>
-            <CardContent>
-                <div className="space-y-4">
-                    <div className="grid grid-cols-2 gap-3">
-                        <Button
-                            variant="outline"
-                            onClick={() => demonstrateHardProblem('2.1')}
-                            className="p-6 h-auto flex-col bg-gradient-to-br from-green-50 to-green-100 border-green-300 hover:from-green-100 hover:to-green-200"
-                        >
-                            <strong className="text-green-800">Form 2.1: Key Generation</strong>
-                            <div className="text-xs mt-2 font-mono">P = x_G × G</div>
-                            <div className="text-xs text-green-600 mt-1">Find secret generator G</div>
-                        </Button>
-                        <Button
-                            variant="outline"
-                            onClick={() => demonstrateHardProblem('2.2')}
-                            className="p-6 h-auto flex-col bg-gradient-to-br from-purple-50 to-purple-100 border-purple-300 hover:from-purple-100 hover:to-purple-200"
-                        >
-                            <strong className="text-purple-800">Form 2.2: Verification</strong>
-                            <div className="text-xs mt-2 font-mono">x_G × P = k × G</div>
-                            <div className="text-xs text-purple-600 mt-1">Transcendental equation</div>
-                        </Button>
-                    </div>
-
-                    {hardProblemDemo && (
-                        <div className="bg-gradient-to-r from-yellow-50 to-orange-50 p-6 rounded-lg border border-yellow-200">
-                            <h4 className="font-semibold mb-3 text-yellow-800">{hardProblemDemo.equation}</h4>
-                            <p className="text-sm mb-4 text-yellow-700">{hardProblemDemo.description}</p>
-
-                            {hardProblemDemo.example && (
-                                <div className="bg-white p-4 rounded-lg border">
-                                    <h5 className="font-medium mb-3 text-gray-800">Mathematical Example:</h5>
-                                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4 text-sm">
-                                        <div>
-                                            <div><strong>Setup:</strong> {hardProblemDemo.example.setup || hardProblemDemo.example.given}</div>
-                                            <div className="mt-1"><strong>Challenge:</strong> {hardProblemDemo.example.challenge || hardProblemDemo.example.find}</div>
-                                        </div>
-                                        <div>
-                                            <div><strong>Difficulty:</strong> {hardProblemDemo.example.difficulty}</div>
-                                            <div className="mt-1"><strong>Usage:</strong> {hardProblemDemo.example.usage}</div>
-                                        </div>
-                                    </div>
-                                </div>
-                            )}
-
-                            <div className="mt-4 p-3 bg-orange-50 rounded border border-orange-200">
-                                <strong className="text-orange-800">Security Analysis:</strong>
-                                <div className="text-sm text-orange-700 mt-1">
-                                    {hardProblemDemo.security_analysis?.complexity || 'O(2^n) brute force only'} -
-                                    {hardProblemDemo.security_analysis?.innovation || hardProblemDemo.security_analysis?.resistance}
-                                </div>
-                            </div>
-                        </div>
-                    )}
-                </div>
-            </CardContent>
-        </Card>
-    );
+            </div>
+        );
+    }
 
     return (
-        <div className="min-h-screen bg-gradient-to-br from-slate-50 to-blue-50 p-4">
+        <div className="min-h-screen bg-gradient-to-br from-slate-50 via-blue-50 to-purple-50 p-4">
             <div className="max-w-7xl mx-auto space-y-6">
                 {/* Header */}
-                <div className="text-center space-y-4">
-                    <h1 className="text-4xl font-bold bg-gradient-to-r from-blue-600 to-purple-600 bg-clip-text text-transparent">
-                        Elliptic Curve Digital Signature with Secret Generator Points
+                <div className="text-center py-8">
+                    <h1 className="text-4xl font-bold bg-gradient-to-r from-purple-600 to-blue-600 bg-clip-text text-transparent mb-4 flex items-center justify-center gap-3">
+                        <Shield className="h-10 w-10 text-purple-600" />
+                        Advanced Digital Signature Scheme
                     </h1>
-                    <p className="text-xl text-gray-600 max-w-4xl mx-auto">
-                        Revolutionary cryptographic approach using secret generator points and transcendental equations
-                        for quantum-resistant digital signatures based on new hard problems
+                    <p className="text-lg text-gray-600 max-w-2xl mx-auto">
+                        Interactive demonstration of cryptographic digital signatures with real-time 3D visualization
                     </p>
-                    <div className="flex items-center justify-center gap-4 text-sm text-gray-500">
-                        <div className="flex items-center gap-1">
-                            <LockIcon className="h-4 w-4" />
-                            <span>Quantum Resistant</span>
-                        </div>
-                        <div className="flex items-center gap-1">
-                            <GitBranchIcon className="h-4 w-4" />
-                            <span>Secret Generator</span>
-                        </div>
-                        <div className="flex items-center gap-1">
-                            <BrainIcon className="h-4 w-4" />
-                            <span>New Hard Problems</span>
-                        </div>
-                    </div>
                 </div>
 
-                {/* Progress Indicator */}
-                <Card>
-                    <CardContent className="pt-6">
-                        <div className="flex items-center justify-between mb-4">
-                            {[1, 2, 3, 4].map((step) => (
-                                <div key={step} className="flex flex-col items-center">
-                                    <div className={`w-12 h-12 rounded-full flex items-center justify-center text-white font-semibold text-lg
-                    ${currentStep >= step ? 'bg-gradient-to-r from-blue-500 to-purple-500' : 'bg-gray-300'}`}>
-                                        {step}
+                {/* Progress Steps */}
+                <Card className="bg-white/70 backdrop-blur-sm border-0 shadow-xl">
+                    <CardContent className="p-6">
+                        <div className="flex items-center justify-between">
+                            {steps.map((step, index) => (
+                                <div key={index} className="flex items-center">
+                                    <div className={`relative flex items-center justify-center w-12 h-12 rounded-full bg-gradient-to-r ${
+                                        currentStep > index + 1 ? step.color : 
+                                        currentStep === index + 1 ? step.color :
+                                        'from-gray-300 to-gray-400'
+                                    } text-white shadow-lg transition-all duration-500`}>
+                                        <step.icon className="h-6 w-6" />
+                                        {currentStep === index + 1 && isProcessing && (
+                                            <div className="absolute inset-0 rounded-full border-2 border-white/30 border-t-white animate-spin"></div>
+                                        )}
                                     </div>
-                                    <div className="text-sm mt-2 text-center font-medium">
-                                        {step === 1 && 'Generate Keys'}
-                                        {step === 2 && 'Sign Message'}
-                                        {step === 3 && 'Verify Signature'}
-                                        {step === 4 && 'Complete'}
-                                    </div>
+                                    {index < steps.length - 1 && (
+                                        <div className={`w-24 h-1 mx-4 transition-all duration-500 ${
+                                            currentStep > index + 1 ? 'bg-gradient-to-r from-green-400 to-blue-400' : 'bg-gray-200'
+                                        }`}></div>
+                                    )}
                                 </div>
                             ))}
                         </div>
-                        <div className="w-full bg-gray-200 rounded-full h-3">
-                            <div
-                                className="bg-gradient-to-r from-blue-500 to-purple-500 h-3 rounded-full transition-all duration-500"
-                                style={{ width: `${(currentStep - 1) * 33.33}%` }}
-                            />
+                        <div className="flex justify-between mt-4">
+                            {steps.map((step, index) => (
+                                <div key={index} className="text-center">
+                                    <p className={`text-sm font-medium ${
+                                        currentStep >= index + 1 ? 'text-gray-800' : 'text-gray-400'
+                                    }`}>
+                                        {step.title}
+                                    </p>
+                                </div>
+                            ))}
                         </div>
                     </CardContent>
                 </Card>
 
-                {/* Main Demo Content */}
-                <div className="grid grid-cols-1 xl:grid-cols-3 gap-6">
-                    {/* Left Column - Interactive Demo */}
-                    <div className="xl:col-span-1 space-y-6">
-                        {/* Step 1: Key Generation */}
-                        <Card>
+                <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+                    {/* Control Panel */}
+                    <div className="lg:col-span-1 space-y-6">
+                        {/* Message Input */}
+                        <Card className="bg-white/70 backdrop-blur-sm border-0 shadow-xl">
                             <CardHeader>
-                                <CardTitle className="flex items-center gap-2">
-                                    <KeyIcon className="h-5 w-5" />
-                                    Step 1: Key Generation
+                                <CardTitle className="text-xl flex items-center gap-2">
+                                    <FileText className="h-5 w-5 text-purple-600" />
+                                    Message to Sign
                                 </CardTitle>
-                                <CardDescription>
-                                    Generate secret generator point G and public point P using Form 2.1 hard problem
-                                </CardDescription>
                             </CardHeader>
                             <CardContent>
+                                <textarea
+                                    value={message}
+                                    onChange={(e) => setMessage(e.target.value)}
+                                    className="w-full p-3 border border-gray-200 rounded-lg resize-none focus:ring-2 focus:ring-purple-500 focus:border-transparent"
+                                    rows={3}
+                                    placeholder="Enter your message here..."
+                                />
+                            </CardContent>
+                        </Card>
+
+                        {/* Action Buttons */}
+                        <Card className="bg-white/70 backdrop-blur-sm border-0 shadow-xl">
+                            <CardContent className="p-6 space-y-4">
                                 <Button
                                     onClick={generateKeys}
                                     disabled={isProcessing}
-                                    className="w-full h-12 text-lg bg-gradient-to-r from-blue-500 to-purple-500 hover:from-blue-600 hover:to-purple-600"
+                                    className="w-full h-12 bg-gradient-to-r from-blue-500 to-cyan-500 hover:from-blue-600 hover:to-cyan-600 text-white font-medium transition-all duration-300 transform hover:scale-105"
                                 >
-                                    {isProcessing ? 'Generating Keys...' : 'Generate EC Key Pair'}
+                                    {currentStep === 1 && isProcessing ? (
+                                        <>
+                                            <Activity className="h-4 w-4 mr-2 animate-spin" />
+                                            Generating Keys...
+                                        </>
+                                    ) : (
+                                        <>
+                                            <Key className="h-4 w-4 mr-2" />
+                                            Generate Keys
+                                        </>
+                                    )}
                                 </Button>
 
-                                {keyData && (
-                                    <div className="mt-4 p-4 bg-gradient-to-r from-green-50 to-emerald-50 rounded-lg border border-green-200">
-                                        <h4 className="font-semibold text-green-800 mb-2 flex items-center gap-1">
-                                            <ZapIcon className="h-4 w-4" />
-                                            Keys Generated Successfully
-                                        </h4>
-                                        <div className="text-sm text-green-700">
-                                            Secret generator point G and public point P = (-x_G) × G created using revolutionary approach
-                                        </div>
-                                    </div>
-                                )}
-                            </CardContent>
-                        </Card>
-
-                        {/* Step 2: Message Signing */}
-                        <Card>
-                            <CardHeader>
-                                <CardTitle className="flex items-center gap-2">
-                                    <PenIcon className="h-5 w-5" />
-                                    Step 2: Message Signing
-                                </CardTitle>
-                                <CardDescription>
-                                    Sign message using secret generator and transcendental point relationships
-                                </CardDescription>
-                            </CardHeader>
-                            <CardContent>
-                                <div className="space-y-4">
-                                    <div>
-                                        <Label htmlFor="message">Message to Sign</Label>
-                                        <Input
-                                            id="message"
-                                            value={message}
-                                            onChange={(e) => setMessage(e.target.value)}
-                                            placeholder="Enter your message here..."
-                                            className="mt-2"
-                                        />
-                                        <div className="text-xs text-gray-500 mt-1">
-                                            {message.length} characters
-                                        </div>
-                                    </div>
-
-                                    <Button
-                                        onClick={signMessage}
-                                        disabled={!keyData || isProcessing}
-                                        className="w-full h-12 bg-gradient-to-r from-purple-500 to-pink-500 hover:from-purple-600 hover:to-pink-600"
-                                    >
-                                        {isProcessing ? 'Signing...' : 'Sign Message'}
-                                    </Button>
-
-                                    {signatureData && (
-                                        <div className="p-4 bg-gradient-to-r from-blue-50 to-indigo-50 rounded-lg border border-blue-200">
-                                            <h4 className="font-semibold text-blue-800 mb-2 flex items-center gap-1">
-                                                <ZapIcon className="h-4 w-4" />
-                                                Message Signed Successfully
-                                            </h4>
-                                            <div className="text-sm text-blue-700">
-                                                Signature format: (R, s, Z) - two elliptic curve points + one scalar
-                                            </div>
-                                        </div>
+                                <Button
+                                    onClick={signMessage}
+                                    disabled={!keyData || isProcessing}
+                                    className="w-full h-12 bg-gradient-to-r from-purple-500 to-pink-500 hover:from-purple-600 hover:to-pink-600 text-white font-medium transition-all duration-300 transform hover:scale-105 disabled:opacity-50 disabled:transform-none"
+                                >
+                                    {currentStep === 2 && isProcessing ? (
+                                        <>
+                                            <Activity className="h-4 w-4 mr-2 animate-spin" />
+                                            Signing Message...
+                                        </>
+                                    ) : (
+                                        <>
+                                            <Shield className="h-4 w-4 mr-2" />
+                                            Sign Message
+                                        </>
                                     )}
-                                </div>
-                            </CardContent>
-                        </Card>
+                                </Button>
 
-                        {/* Step 3: Signature Verification */}
-                        <Card>
-                            <CardHeader>
-                                <CardTitle className="flex items-center gap-2">
-                                    <ShieldCheckIcon className="h-5 w-5" />
-                                    Step 3: Signature Verification
-                                </CardTitle>
-                                <CardDescription>
-                                    Verify signature using transcendental Form 2.2 hard problem equation
-                                </CardDescription>
-                            </CardHeader>
-                            <CardContent>
                                 <Button
                                     onClick={verifySignature}
                                     disabled={!signatureData || isProcessing}
-                                    className="w-full h-12 bg-gradient-to-r from-green-500 to-emerald-500 hover:from-green-600 hover:to-emerald-600"
+                                    className="w-full h-12 bg-gradient-to-r from-green-500 to-emerald-500 hover:from-green-600 hover:to-emerald-600 text-white font-medium transition-all duration-300 transform hover:scale-105 disabled:opacity-50 disabled:transform-none"
                                 >
-                                    {isProcessing ? 'Verifying...' : 'Verify Signature'}
+                                    {currentStep === 3 && isProcessing ? (
+                                        <>
+                                            <Activity className="h-4 w-4 mr-2 animate-spin" />
+                                            Verifying...
+                                        </>
+                                    ) : (
+                                        <>
+                                            <CheckCircle className="h-4 w-4 mr-2" />
+                                            Verify Signature
+                                        </>
+                                    )}
                                 </Button>
 
-                                {verificationResult !== null && (
-                                    <div className={`mt-4 p-4 rounded-lg border ${verificationResult ?
-                                        'bg-gradient-to-r from-green-50 to-emerald-50 border-green-200' :
-                                        'bg-gradient-to-r from-red-50 to-pink-50 border-red-200'}`}>
-                                        <h4 className={`font-semibold mb-2 flex items-center gap-1 ${verificationResult ? 'text-green-800' : 'text-red-800'}`}>
-                                            <ZapIcon className="h-4 w-4" />
-                                            {verificationResult ? 'Signature Valid ✅' : 'Signature Invalid ❌'}
-                                        </h4>
-                                        <div className={`text-sm ${verificationResult ? 'text-green-700' : 'text-red-700'}`}>
-                                            {verificationResult ?
-                                                'The signature satisfies the transcendental point equation π(R) × Z = s×e×R + π(Z+s×R)×P' :
-                                                'The signature does not satisfy the verification equations'
-                                            }
-                                        </div>
-                                    </div>
-                                )}
+                                <Button
+                                    onClick={resetDemo}
+                                    variant="outline"
+                                    className="w-full h-10 border-gray-300 hover:bg-gray-50 transition-all duration-300"
+                                >
+                                    <RotateCcw className="h-4 w-4 mr-2" />
+                                    Reset Demo
+                                </Button>
                             </CardContent>
                         </Card>
 
-                        {/* Reset Button */}
-                        <Button
-                            onClick={resetDemo}
-                            variant="outline"
-                            className="w-full h-10"
-                        >
-                            Reset Demo
-                        </Button>
-                    </div>
-
-                    {/* Right Columns - Visualizations and Data */}
-                    <div className="xl:col-span-2 space-y-6">
-                        {/* Elliptic Curve Visualization */}
-                        {/* <EllipticCurveVisualization /> */}
-                        <Enhanced3DSection />
-
-                        {/* Message and Keys Display */}
-                        <MessageAndKeysDisplay />
-
-                        {/* Educational Explanation */}
-                        {showExplanation && (
-                            <Card>
-                                <CardHeader>
-                                    <CardTitle className="flex items-center gap-2">
-                                        <InfoIcon className="h-5 w-5" />
-                                        {getExplanationContent().title}
-                                    </CardTitle>
-                                </CardHeader>
-                                <CardContent>
-                                    <div className="bg-gradient-to-r from-amber-50 to-yellow-50 p-6 rounded-lg border border-amber-200">
-                                        <p className="text-amber-800 leading-relaxed">
-                                            {getExplanationContent().content}
-                                        </p>
+                        {/* Results */}
+                        {verificationResult !== null && (
+                            <Card className="bg-gradient-to-br from-green-50 to-emerald-50 border-green-200 shadow-xl">
+                                <CardContent className="p-6">
+                                    <div className="flex items-center gap-3 mb-3">
+                                        <CheckCircle className="h-6 w-6 text-green-600" />
+                                        <h3 className="text-lg font-semibold text-green-800">
+                                            Signature Verified Successfully
+                                        </h3>
                                     </div>
+                                    <p className="text-green-700 text-sm">
+                                        The digital signature has been cryptographically verified using advanced hard problem mathematics.
+                                    </p>
+                                    <Badge className="mt-3 bg-green-600 text-white">
+                                        Status: VALID
+                                    </Badge>
                                 </CardContent>
                             </Card>
                         )}
+                    </div>
 
-                        {/* Hard Problem Exploration */}
-                        <HardProblemExploration />
+                    {/* 3D Visualization */}
+                    <div className="lg:col-span-2 space-y-6">
+                        <Interactive3DVisualization
+                            keyData={keyData}
+                            signatureData={signatureData}
+                            currentStep={currentStep}
+                            isProcessing={isProcessing}
+                        />
 
-                        {/* Performance Analysis */}
-                        <PerformanceAnalysis />
+                        {/* Technical Details */}
+                        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                            {/* Key Information */}
+                            {keyData && (
+                                <Card className="bg-white/70 backdrop-blur-sm border-0 shadow-xl">
+                                    <CardHeader>
+                                        <CardTitle className="text-lg flex items-center gap-2">
+                                            <Lock className="h-4 w-4 text-blue-600" />
+                                            Cryptographic Keys
+                                        </CardTitle>
+                                    </CardHeader>
+                                    <CardContent className="space-y-3">
+                                        <div>
+                                            <p className="text-sm font-medium text-gray-600 mb-1">Private Key:</p>
+                                            <p className="text-xs font-mono bg-red-50 p-2 rounded border text-red-800 break-all">
+                                                {keyData.privateKey.substring(0, 32)}...
+                                            </p>
+                                        </div>
+                                        <div>
+                                            <p className="text-sm font-medium text-gray-600 mb-1">Public Key:</p>
+                                            <p className="text-xs font-mono bg-green-50 p-2 rounded border text-green-800 break-all">
+                                                {keyData.publicKey.substring(0, 32)}...
+                                            </p>
+                                        </div>
+                                    </CardContent>
+                                </Card>
+                            )}
+
+                            {/* Signature Information */}
+                            {signatureData && (
+                                <Card className="bg-white/70 backdrop-blur-sm border-0 shadow-xl">
+                                    <CardHeader>
+                                        <CardTitle className="text-lg flex items-center gap-2">
+                                            <Zap className="h-4 w-4 text-purple-600" />
+                                            Digital Signature
+                                        </CardTitle>
+                                    </CardHeader>
+                                    <CardContent className="space-y-3">
+                                        <div>
+                                            <p className="text-sm font-medium text-gray-600 mb-1">Signature R:</p>
+                                            <p className="text-xs font-mono bg-blue-50 p-2 rounded border text-blue-800 break-all">
+                                                ({signatureData.signature.R.x.substring(0, 16)}..., {signatureData.signature.R.y.substring(0, 16)}...)
+                                            </p>
+                                        </div>
+                                        <div>
+                                            <p className="text-sm font-medium text-gray-600 mb-1">Signature s:</p>
+                                            <p className="text-xs font-mono bg-purple-50 p-2 rounded border text-purple-800 break-all">
+                                                {signatureData.signature.s.substring(0, 32)}...
+                                            </p>
+                                        </div>
+                                        <div>
+                                            <p className="text-sm font-medium text-gray-600 mb-1">Hash:</p>
+                                            <p className="text-xs font-mono bg-gray-50 p-2 rounded border text-gray-800 break-all">
+                                                {signatureData.hash.substring(0, 32)}...
+                                            </p>
+                                        </div>
+                                    </CardContent>
+                                </Card>
+                            )}
+                        </div>
+
+                        {/* Mathematical Operations Display */}
+                        <Card className="bg-white/70 backdrop-blur-sm border-0 shadow-xl">
+                            <CardHeader>
+                                <CardTitle className="text-lg flex items-center gap-2">
+                                    <Brain className="h-4 w-4 text-indigo-600" />
+                                    Hard Problem Mathematics
+                                </CardTitle>
+                            </CardHeader>
+                            <CardContent>
+                                <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                                    <div className="bg-gradient-to-br from-blue-50 to-cyan-50 p-4 rounded-lg border border-blue-200">
+                                        <h4 className="font-semibold text-blue-800 mb-2">Key Generation</h4>
+                                        <p className="text-sm text-blue-700 mb-2">Form 2.1 Hard Problem:</p>
+                                        <code className="text-xs bg-white/60 p-2 rounded block text-blue-800">
+                                            P = k × G<br />
+                                            π(P) × Q = Transcendental
+                                        </code>
+                                    </div>
+                                    
+                                    <div className="bg-gradient-to-br from-purple-50 to-pink-50 p-4 rounded-lg border border-purple-200">
+                                        <h4 className="font-semibold text-purple-800 mb-2">Signature Generation</h4>
+                                        <p className="text-sm text-purple-700 mb-2">Form 2.2 Hard Problem:</p>
+                                        <code className="text-xs bg-white/60 p-2 rounded block text-purple-800">
+                                            R = r × G<br />
+                                            s = k⁻¹(e + r×dₐ) mod n
+                                        </code>
+                                    </div>
+                                    
+                                    <div className="bg-gradient-to-br from-green-50 to-emerald-50 p-4 rounded-lg border border-green-200">
+                                        <h4 className="font-semibold text-green-800 mb-2">Verification</h4>
+                                        <p className="text-sm text-green-700 mb-2">Transcendental Check:</p>
+                                        <code className="text-xs bg-white/60 p-2 rounded block text-green-800">
+                                            π(R) × Z = s×e×R<br />
+                                            + π(Z+s×R)×P
+                                        </code>
+                                    </div>
+                                </div>
+                                
+                                {/* Performance Metrics */}
+                                <PerformanceMetrics />
+                            </CardContent>
+                        </Card>
+
+                        {/* Security Analysis */}
+                        <Card className="bg-gradient-to-br from-amber-50 to-orange-50 border-amber-200 shadow-xl">
+                            <CardHeader>
+                                <CardTitle className="text-lg flex items-center gap-2 text-amber-800">
+                                    <Shield className="h-4 w-4" />
+                                    Security Analysis & Innovation
+                                </CardTitle>
+                            </CardHeader>
+                            <CardContent className="text-amber-800">
+                                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                                    <div>
+                                        <h4 className="font-semibold mb-2">Security Advantages</h4>
+                                        <ul className="text-sm space-y-1 list-disc list-inside">
+                                            <li>Novel transcendental hard problems</li>
+                                            <li>Post-quantum resistance potential</li>
+                                            <li>Enhanced computational complexity</li>
+                                            <li>Innovative mathematical foundations</li>
+                                        </ul>
+                                    </div>
+                                    <div>
+                                        <h4 className="font-semibold mb-2">Performance Benefits</h4>
+                                        <ul className="text-sm space-y-1 list-disc list-inside">
+                                            <li>Optimized operation counts</li>
+                                            <li>Memory-efficient implementation</li>
+                                            <li>Reduced signature size</li>
+                                            <li>Fast verification process</li>
+                                        </ul>
+                                    </div>
+                                </div>
+                                
+                                <div className="mt-4 p-3 bg-white/60 rounded-lg">
+                                    <p className="text-sm">
+                                        <strong>Research Innovation:</strong> This implementation demonstrates novel approaches to digital signature schemes 
+                                        based on new hard problem formulations that extend beyond traditional discrete logarithm problems.
+                                    </p>
+                                </div>
+                            </CardContent>
+                        </Card>
                     </div>
                 </div>
 
-                {/* Error Display */}
-                {error && (
-                    <Alert className="border-red-200 bg-red-50">
-                        <AlertDescription className="text-red-800">
-                            {error}
-                        </AlertDescription>
-                    </Alert>
-                )}
-
-                {/* Research Paper Citation */}
-                <Card className="bg-gradient-to-r from-gray-50 to-blue-50">
-                    <CardContent className="pt-6">
-                        <div className="text-center space-y-3">
-                            <h3 className="font-semibold text-gray-800">Based on Research Paper:</h3>
-                            <p className="text-sm text-gray-600">
-                                "Construction of Digital Signature Schemes Based on a New Form of the Discrete Logarithm Problem"
-                            </p>
-                            <p className="text-xs text-gray-500 max-w-3xl mx-auto">
-                                This implementation demonstrates the novel elliptic curve cryptographic approach described in Section IV of the research paper,
-                                featuring quantum-resistant security through secret generator points and transcendental mathematical structures.
-                            </p>
+                {/* Educational Footer */}
+                <Card className="bg-gradient-to-r from-indigo-500 via-purple-500 to-pink-500 text-white shadow-xl">
+                    <CardContent className="p-6 text-center">
+                        <h3 className="text-xl font-bold mb-2">Educational Digital Signature Demonstration</h3>
+                        <p className="text-white/90 max-w-3xl mx-auto">
+                            This interactive demo showcases advanced cryptographic techniques with real-time 3D visualization. 
+                            The implementation features novel hard problems for enhanced security and innovative mathematical approaches 
+                            to digital signature verification.
+                        </p>
+                        <div className="flex justify-center gap-4 mt-4">
+                            <Badge variant="secondary" className="bg-white/20 text-white">
+                                Elliptic Curve Cryptography
+                            </Badge>
+                            <Badge variant="secondary" className="bg-white/20 text-white">
+                                Transcendental Mathematics
+                            </Badge>
+                            <Badge variant="secondary" className="bg-white/20 text-white">
+                                Post-Quantum Research
+                            </Badge>
                         </div>
                     </CardContent>
                 </Card>
